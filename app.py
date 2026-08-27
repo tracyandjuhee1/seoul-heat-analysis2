@@ -7,7 +7,7 @@ import json
 
 # --- 페이지 설정 ---
 st.set_page_config(
-    page_title="서울시 폭염 온열질환 & 응급 감시 시공간 분석",
+    page_title="서울시 폭염 온열질환 시공간 분석 대시보드",
     page_icon="🔥",
     layout="wide"
 )
@@ -104,9 +104,9 @@ filtered_df = df_master[
     (df_master['월'] <= selected_months[1])
 ]
 
-# --- 대시보드 타이틀 ---
+# --- 대시보드 타이틀 (취소선 원인 마크다운 기호 제거 완료) ---
 st.title("🔥 서울시 폭염 온열질환 및 응급 감시 시공간 분석 대시보드")
-st.markdown("여름철(5~9월) 기후 리스크 대응을 위한 **지표화(Index)**·**타겟팅(Targeting)**·**공간 위험도 지도** 통합 분석 (2020~2024)")
+st.markdown("여름철(5~9월) 기후 리스크 대응을 위한 지표화(Index)·타겟팅(Targeting)·공간 위험도 지도 통합 분석 (2020~2024)")
 st.markdown("---")
 
 # --- 모듈 1: 메인 KPI (지표화) ---
@@ -199,7 +199,7 @@ with col_pie2:
                          color_discrete_sequence=px.colors.sequential.Sunset)
         st.plotly_chart(fig_loc, use_container_width=True)
 
-# --- 💡 [신규 추가] 모듈 5: 실내외 장소 유형별 공간 취약성 매트릭스 맵 ---
+# --- 모듈 5: 실내외 장소 유형별 공간 취약성 매트릭스 ---
 st.subheader("🏙️ 모듈 5: 자치구별 × 실내외 장소 유형별 폭염 취약성 매트릭스")
 if '실내외구분' in filtered_df.columns and '자치구' in filtered_df.columns:
     matrix_df = filtered_df.groupby(['자치구', '실내외구분'])['출동건수'].sum().reset_index()
