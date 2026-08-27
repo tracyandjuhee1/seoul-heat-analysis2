@@ -71,7 +71,6 @@ def generate_safe_dummy_data():
             else:
                 base_count = np.random.poisson(lam=0.8)
             
-            # 시간대별 분산 (오후 2~5시에 집중되도록 가중치 부여)
             for hour in [10, 12, 14, 15, 16, 18]:
                 weight = 2.5 if hour in [14, 15, 16] else 1.0
                 c = int(base_count * weight * np.random.uniform(0.2, 0.5))
@@ -99,13 +98,19 @@ if '발생일자' in df_119.columns and '월' not in df_119.columns:
     df_119['월'] = df_119['발생일자'].dt.month
 
 if '시간' not in df_119.columns:
-    df_119['시간'] = 14 # 기본값 오후 2시
+    df_119['시간'] = 14
 
-# --- 사이드바 필터 ---
+# --- 사이드바 필터 & 토글 설정 ---
 st.sidebar.header("🔍 분석 조건 설정")
 available_years = sorted(df_119['연도'].dropna().unique().astype(int)) if '연도' in df_119.columns else [2020, 2021, 2022, 2023, 2024]
 selected_years = st.sidebar.multiselect("연도 선택", available_years, default=available_years)
 selected_months = st.sidebar.slider("분석 기간 (폭염 집중 5~9월)", 5, 9, (5, 9))
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎛️ 대시보드 옵션 제어")
+# 💡 핵심 기능: 토글 스위치 생성
+show_raw_data = st.sidebar.toggle("원본 데이터 테이블(Raw Data) 보기", value=False)
+enable_detailed_desc = st.sidebar.toggle("상세 정책 해석 및 해설 열기", value=True)
 
 filtered_df = df_119[
     (df_119['연도'].isin(selected_years)) & 
@@ -132,6 +137,10 @@ col2.metric(label="전년 동기 대비 증가율", value="+14.2%", delta_color=
 col3.metric(label="서울시 평균 초과 고위험 자치구", value=f"{high_risk_count} 개 구")
 col4.metric(label="고령층(65세 이상) 비중", value="44.2%", delta="+3.1%p")
 
+if enable_detailed_desc:
+    with st.expander("💡 [모듈 1 해설] 지표 산출 배경 보기"):
+        st.write("단순 발생 건수뿐만 아니라 서울시 평균 대비 위험 비율을 산출하여 자치구별 상대적 취약성을 객관적으로 평가합니다.")
+
 st.markdown("")
 
 # --- 모듈 2: 시공간 추이 및 시간대별 골든타임 히트맵 ---
@@ -148,7 +157,6 @@ with col_t1:
 
 with col_t2:
     if '시간' in filtered_df.columns and '월' in filtered_df.columns:
-        # 시간대별 x 월별 히트맵 생성
         heat_data = filtered_df.groupby(['월', '시간'])['출동건수'].sum().reset_index()
         fig_heat = px.density_heatmap(heat_data, x='월', y='시간', z='출동건수', 
                                       title='월별·시간대별 온열질환 집중 골든타임 히트맵',
@@ -156,7 +164,11 @@ with col_t2:
                                       color_continuous_scale='Reds')
         st.plotly_chart(fig_heat, use_container_width=True)
 
-# --- 모듈 3: 공간 위험도 지도 (Choropleth Map) & 자치구 랭킹 ---
+if enable_detailed_desc:
+    with st.expander("💡 [모듈 2 해설] 시공간 패턴 분석 결과 보기"):
+        st.write("폭염 특보가 발효되는 한낮(14~16시)과 7~8월 휴가철·더위 피크 시기에 출동 건수가 집중되는 경향을 보입니다.")
+
+# --- 모듈 3: 공간 위험도 지도 & 자치구 랭킹 ---
 st.subheader("🗺️ 모듈 3: 서울시 자치구별 폭염 위험 지도 및 핫스팟 분석")
 if not gu_agg.empty:
     gu_agg['서울시평균대비지수'] = gu_agg['출동건수'] / (mean_val if mean_val > 0 else 1)
@@ -190,7 +202,7 @@ if not gu_agg.empty:
         top_gus = gu_agg.sort_values('출동건수', ascending=False).head(5)
         st.dataframe(top_gus[['자치구', '출동건수', '서울시평균대비지수']], hide_index=True)
 
-# --- 모듈 4: 취약 계층 & 환경 분석 (타겟팅) ---
+# --- 모듈 4: 취약 계층 & 환경 분석 ---
 st.subheader("👥 모듈 4: 취약 계층 및 발생 장소 타겟팅 분석")
 col_pie1, col_pie2 = st.columns(2)
 
@@ -205,3 +217,9 @@ with col_pie2:
         fig_loc = px.pie(filtered_df, names='발생장소', title='주요 발생 장소별 비중', hole=0.4,
                          color_discrete_sequence=px.colors.sequential.Sunset)
         st.plotly_chart(fig_loc, use_container_width=True)
+
+# --- [부가 기능] 사이드바 토글로 제어되는 원본 데이터 테이블 표시 ---
+if show_raw_data:
+    st.markdown("---")
+    st.subheader("📋 필터링된 원본 데이터 미리보기 (Raw Data)")
+    st.dataframe(filtered_df.head(100), use_container_width=True)
