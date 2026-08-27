@@ -104,9 +104,9 @@ filtered_df = df_master[
     (df_master['월'] <= selected_months[1])
 ]
 
-# --- 대시보드 타이틀 (취소선 원인 마크다운 기호 제거 완료) ---
+# --- 대시보드 타이틀 (취소선 방지를 위해 st.write 및 span 태그 활용) ---
 st.title("🔥 서울시 폭염 온열질환 및 응급 감시 시공간 분석 대시보드")
-st.markdown("여름철(5~9월) 기후 리스크 대응을 위한 지표화(Index)·타겟팅(Targeting)·공간 위험도 지도 통합 분석 (2020~2024)")
+st.markdown('<p style="text-decoration: none !important;">여름철 (5-9월) 기후 리스크 대응을 위한 지표화, 타겟팅, 공간 위험도 지도 통합 분석 (2020-2024)</p>', unsafe_allow_html=True)
 st.markdown("---")
 
 # --- 모듈 1: 메인 KPI (지표화) ---
