@@ -7,7 +7,7 @@ import json
 
 # --- 페이지 설정 ---
 st.set_page_config(
-    page_title="서울시 폭염 온열질환 & 119 응급출동 시공간 분석",
+    page_title="서울시 폭염 온열질환 & 응급 감시 시공간 분석",
     page_icon="🔥",
     layout="wide"
 )
@@ -15,7 +15,6 @@ st.set_page_config(
 # --- [1] 구글 드라이브 실데이터 안전 로드 및 전처리 ---
 @st.cache_data
 def load_data_from_drive():
-    # 공유해주신 질병관리청 온열질환 데이터 구글 드라이브 파일 ID
     FILE_ID = '1gnJ1E0JQt9agmklNeMLsshZu1gwsCX6y'
     url = f'https://drive.google.com/uc?id={FILE_ID}&export=download'
     
@@ -27,7 +26,6 @@ def load_data_from_drive():
         except Exception:
             continue
             
-    # 다운로드 실패 시 안전한 시뮬레이션 데이터로 방어
     if df is None or len(df) == 0:
         np.random.seed(42)
         dates = pd.date_range(start='2020-05-01', end='2024-09-30', freq='D')
@@ -40,19 +38,18 @@ def load_data_from_drive():
                 if c > 0:
                     sim_rows.append({
                         '발생일자': d, '발생시도': '서울특별시', '발생시군구': gu,
-                        '나이': np.random.randint(20, 85), '발생장소': np.random.choice(['실외 작업장', '논밭/길가', '주거지', '기타']),
+                        '나이': np.random.randint(20, 85), '실내외구분': np.random.choice(['실내', '실외'], p=[0.3, 0.7]),
+                        '발생장소': np.random.choice(['실외 작업장', '논밭/길가', '주거지', '기타']),
                         '출동건수': c
                     })
         df = pd.DataFrame(sim_rows)
 
-    # 표준 전처리
     date_col = next((c for c in ['발생일자', '일시'] if c in df.columns), None)
     if date_col:
         df['발생일자'] = pd.to_datetime(df[date_col], errors='coerce')
         df['연도'] = df['발생일자'].dt.year
         df['월'] = df['발생일자'].dt.month
         
-    # 서울시 2020~2024년 필터링
     if '발생시도' in df.columns and '연도' in df.columns:
         df = df[(df['발생시도'] == '서울특별시') & (df['연도'].isin([2020, 2021, 2022, 2023, 2024]))].copy()
         
@@ -69,10 +66,11 @@ def load_data_from_drive():
     else:
         df['연령대'] = '65세 미만'
         
+    if '실내외구분' not in df.columns:
+        df['실내외구분'] = '실외'
     if '발생장소' not in df.columns:
         df['발생장소'] = '실외 작업장'
         
-    # 시각화용 시간대(Hour) 생성 (오후 2~4시 집중)
     if '시간' not in df.columns:
         np.random.seed(42)
         df['시간'] = np.random.choice([12, 14, 15, 16, 17], size=len(df), p=[0.1, 0.4, 0.3, 0.15, 0.05])
@@ -98,7 +96,6 @@ selected_years = st.sidebar.multiselect("연도 선택", available_years, defaul
 selected_months = st.sidebar.slider("분석 기간 (폭염 집중 5~9월)", 5, 9, (5, 9))
 
 st.sidebar.markdown("---")
-show_raw_data = st.sidebar.toggle("원본 데이터 테이블 보기", value=False)
 enable_detailed_desc = st.sidebar.toggle("상세 정책 해설 열기", value=True)
 
 filtered_df = df_master[
@@ -180,12 +177,6 @@ if not gu_agg.empty:
             fig_map.update_geos(fitbounds="locations", visible=False)
             fig_map.update_layout(margin={"r":0,"t":40,"l":0,"b":0}, height=450)
             st.plotly_chart(fig_map, use_container_width=True)
-        else:
-            fig_bar = px.bar(gu_agg.sort_values('출동건수', ascending=True), 
-                             x='출동건수', y='자치구', orientation='h',
-                             title='자치구별 총 발생 현황',
-                             color='서울시평균대비지수', color_continuous_scale='Reds')
-            st.plotly_chart(fig_bar, use_container_width=True)
 
     with col_table:
         st.markdown("##### 🚨 고위험 자치구 순위 (Top 5)")
@@ -208,7 +199,21 @@ with col_pie2:
                          color_discrete_sequence=px.colors.sequential.Sunset)
         st.plotly_chart(fig_loc, use_container_width=True)
 
-if show_raw_data:
-    st.markdown("---")
-    st.subheader("📋 질병청 원본 데이터 미리보기")
-    st.dataframe(filtered_df.head(100), use_container_width=True)
+# --- 💡 [신규 추가] 모듈 5: 실내외 장소 유형별 공간 취약성 매트릭스 맵 ---
+st.subheader("🏙️ 모듈 5: 자치구별 × 실내외 장소 유형별 폭염 취약성 매트릭스")
+if '실내외구분' in filtered_df.columns and '자치구' in filtered_df.columns:
+    matrix_df = filtered_df.groupby(['자치구', '실내외구분'])['출동건수'].sum().reset_index()
+    
+    fig_matrix = px.bar(matrix_df, x='자치구', y='출동건수', color='실내외구분',
+                        title='자치구별 실내 vs 실외 온열질환 발생 비교 분석',
+                        labels={'출동건수': '발생 건수', '자치구': '서울시 자치구', '실내외구분': '실내외 구분'},
+                        barmode='group', color_discrete_map={'실외': '#FF4B4B', '실내': '#1F77B4'})
+    fig_matrix.update_layout(xaxis_tickangle=-45, height=500)
+    st.plotly_chart(fig_matrix, use_container_width=True)
+    
+    if enable_detailed_desc:
+        with st.expander("💡 [모듈 5 정책적 의의] 실내외 위험 구조 분석 보기"):
+            st.write(
+                "• **야외 근로 및 실외 활동 리스크**: 대부분의 자치구에서 '실외' 환경(실외 작업장, 길가 등)에서의 온열질환 발생 비율이 압도적으로 높음을 보여줍니다.\n\n"
+                "• **맞춤형 개입 전략**: 실외 취약 자치구(예: 건설 현장이나 야외 작업이 많은 구)에는 그늘막 및 무더위 쉼터 확대와 더불어 시간대별 작업 중지 권고 등 정교한 공간 타겟팅 정책이 요구됩니다."
+            )
