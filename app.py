@@ -125,6 +125,12 @@ col2.metric(label="전년 동기 대비 추세", value="상승세 (+14.2%)", del
 col3.metric(label="서울시 평균 초과 고위험 자치구", value=f"{high_risk_count} 개 구")
 col4.metric(label="고령층(65세 이상) 비중", value=f"{elderly_ratio:.1f}%")
 
+# [추가됨] 고위험 자치구 9곳 이름 화면 출력
+if not gu_agg.empty:
+    high_risk_df = gu_agg[gu_agg['출동건수'] > mean_val]
+    high_risk_list = ", ".join(high_risk_df['자치구'].tolist())
+    st.info(f"🚨 **서울시 평균(약 {mean_val:.1f}건) 초과 고위험 자치구 (총 {len(high_risk_df)}개 구):** {high_risk_list}")
+
 if enable_detailed_desc:
     with st.expander("💡 [모듈 1 해설] 지표 산출 배경 보기"):
         st.write("질병관리청 온열질환 감시 데이터를 기반으로 서울시 자치구별 상대적 위험도와 고령층 취약성을 객관적으로 평가합니다.")
