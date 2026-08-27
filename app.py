@@ -2,25 +2,26 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import urllib.request
+import json
 
 # --- 페이지 설정 ---
 st.set_page_config(
-    page_title="서울시 폭염 온열질환 & 119 응급출동 시공간 분석",
+    page_title="서울시 폭염 온열질환 & 119 응급출동 공간 분석 대시보드",
     page_icon="🔥",
     layout="wide"
 )
 
-# --- [1] 다중 구글 드라이브 파일 로드 및 2023~2024 추출 함수 ---
+# --- [1] 데이터 및 서울시 자치구 GeoJSON 로드 함수 ---
 @st.cache_data
-def load_and_filter_drive_data():
-    # 💡 [입력 필요] 보유하신 구글 드라이브 파일 ID들을 각각 입력하세요.
+def load_data_and_geojson():
+    # 💡 구글 드라이브 파일 ID 입력 (미입력 시 안전 더미 가동)
     DRIVE_FILE_IDS = {
         '119_2020_2022': '기존에_사용하던_2020_2022데이터_파일ID', 
         '119_2022_2024': '새로올린_서울시소방구급출동현황_2022_2024_파일ID'
     }
     
     dfs = []
-    
     for key, file_id in DRIVE_FILE_IDS.items():
         if '여기에' in file_id or not file_id:
             continue
@@ -32,31 +33,35 @@ def load_and_filter_drive_data():
                 break
             except Exception:
                 continue
-                
         if df_temp is not None:
-            # 날짜 컬럼 표준화 및 연도 추출
             date_col = next((col for col in ['발생일자', '일시', '출동일시', '접수일시'] if col in df_temp.columns), None)
             if date_col:
                 df_temp['발생일자'] = pd.to_datetime(df_temp[date_col], errors='coerce')
                 df_temp['연도'] = df_temp['발생일자'].dt.year
-                
-                # '119_2022_2024' 파일인 경우 2023, 2024년 데이터만 필터링!
                 if key == '119_2022_2024':
                     df_temp = df_temp[df_temp['연도'].isin([2023, 2024])]
-                    
             dfs.append(df_temp)
             
-    if dfs:
-        return pd.concat(dfs, ignore_index=True)
-    else:
-        return None
+    df_119 = pd.concat(dfs, ignore_index=True) if dfs else None
 
-# 안전한 더미 데이터 생성 (파일 ID 미입력 시 비상용)
+    # 서울시 자치구 GeoJSON 다운로드
+    geojson_url = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
+    seoul_geojson = None
+    try:
+        with urllib.request.urlopen(geojson_url) as response:
+            seoul_geojson = json.loads(response.read().decode('utf-8'))
+    except Exception:
+        pass
+
+    return df_119, seoul_geojson
+
+# 안전한 더미 데이터 생성기
 @st.cache_data
 def generate_safe_dummy_data():
     np.random.seed(42)
     dates = pd.date_range(start='2020-05-01', end='2024-09-30')
-    gu_list = ['강남구', '송파구', '강서구', '노원구', '관악구', '은평구', '양천구', '성동구', '용산구', '종로구', '중구', '마포구']
+    gu_list = ['강남구', '송파구', '강서구', '노원구', '관악구', '은평구', '양천구', '성동구', '용산구', '종로구', '중구', '마포구',
+               '광진구', '동대문구', '중랑구', '성북구', '강북구', '도봉구', '서대문구', '구로구', '금천구', '영등포구', '동작구', '서초구', '강동구']
     
     data = []
     for d in dates:
@@ -76,12 +81,11 @@ def generate_safe_dummy_data():
             })
     return pd.DataFrame(data)
 
-# 데이터 로드 실행
-df_119 = load_and_filter_drive_data()
+# 데이터 및 지도 경계 로드
+df_119, seoul_geojson = load_data_and_geojson()
 if df_119 is None or len(df_119) == 0:
     df_119 = generate_safe_dummy_data()
 
-# 파생 컬럼 보정 (월, 연도 등)
 if '발생일자' in df_119.columns and '월' not in df_119.columns:
     df_119['발생일자'] = pd.to_datetime(df_119['발생일자'], errors='coerce')
     df_119['연도'] = df_119['발생일자'].dt.year
@@ -93,16 +97,15 @@ available_years = sorted(df_119['연도'].dropna().unique().astype(int)) if '연
 selected_years = st.sidebar.multiselect("연도 선택", available_years, default=available_years)
 selected_months = st.sidebar.slider("분석 기간 (폭염 집중 5~9월)", 5, 9, (5, 9))
 
-# 필터링 적용
 filtered_df = df_119[
     (df_119['연도'].isin(selected_years)) & 
     (df_119['월'] >= selected_months[0]) & 
     (df_119['월'] <= selected_months[1])
 ]
 
-# --- 대시보드 메인 타이틀 ---
+# --- 대시보드 타이틀 ---
 st.title("🔥 서울시 폭염 온열질환 및 119 응급출동 시공간 분석 대시보드")
-st.markdown("여름철 기후 리스크 대응을 위한 **지표화(Index)**·**타겟팅(Targeting)**·**공간 위험도** 통합 분석 (2020~2024)")
+st.markdown("여름철(5~9월) 기후 리스크 대응을 위한 **지표화(Index)**·**타겟팅(Targeting)**·**공간 위험도 지도** 통합 분석 (2020~2024)")
 st.markdown("---")
 
 # --- 모듈 1: 메인 KPI (지표화) ---
@@ -130,19 +133,35 @@ if '발생일자' in filtered_df.columns and '출동건수' in filtered_df.colum
     fig_time.update_traces(line_color='#FF4B4B')
     st.plotly_chart(fig_time, use_container_width=True)
 
-# --- 모듈 3: 공간 위험도 맵 (자치구별 비교) ---
-st.subheader("🗺️ 모듈 3: 자치구별 폭염 위험 지수 및 핫스팟")
+# --- 모듈 3: 공간 위험도 지도 (Choropleth Map) & 자치구 랭킹 ---
+st.subheader("🗺️ 모듈 3: 서울시 자치구별 폭염 위험 지도 및 핫스팟 분석")
 if not gu_agg.empty:
     gu_agg['서울시평균대비지수'] = gu_agg['출동건수'] / (mean_val if mean_val > 0 else 1)
-    col_map, col_table = st.columns([2, 1])
+    
+    col_map, col_table = st.columns([1.3, 1])
 
     with col_map:
-        fig_bar = px.bar(gu_agg.sort_values('출동건수', ascending=True), 
-                         x='출동건수', y='자치구', orientation='h',
-                         title='자치구별 총 응급출동 발생 현황 (서울시 평균 대비)',
-                         color='서울시평균대비지수',
-                         color_continuous_scale='Reds')
-        st.plotly_chart(fig_bar, use_container_width=True)
+        if seoul_geojson is not None:
+            # Plotly Choropleth 지도 시각화
+            fig_map = px.choropleth(
+                gu_agg,
+                geojson=seoul_geojson,
+                locations='자치구',
+                featureidkey='properties.name',
+                color='출동건수',
+                color_continuous_scale='Reds',
+                title='서울시 자치구별 119 온열질환 출동 분포 지도',
+                labels={'출동건수': '출동 건수'}
+            )
+            fig_map.update_geos(fitbounds="locations", visible=False)
+            fig_map.update_layout(margin={"r":0,"t":40,"l":0,"b":0}, height=450)
+            st.plotly_chart(fig_map, use_container_width=True)
+        else:
+            fig_bar = px.bar(gu_agg.sort_values('출동건수', ascending=True), 
+                             x='출동건수', y='자치구', orientation='h',
+                             title='자치구별 총 응급출동 발생 현황',
+                             color='서울시평균대비지수', color_continuous_scale='Reds')
+            st.plotly_chart(fig_bar, use_container_width=True)
 
     with col_table:
         st.markdown("##### 🚨 고위험 자치구 순위 (Top 5)")
