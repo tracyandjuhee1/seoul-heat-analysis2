@@ -7,12 +7,12 @@ import json
 
 # --- 페이지 설정 ---
 st.set_page_config(
-    page_title="서울시 폭염 온열질환 & 119 응급출동 공간 분석 대시보드",
+    page_title="서울시 폭염 온열질환 & 119 응급출동 시공간 분석",
     page_icon="🔥",
     layout="wide"
 )
 
-# --- [1] 데이터 및 서울시 자치구 GeoJSON 로드 함수 ---
+# --- [1] 데이터 및 자치구 GeoJSON 로드 함수 ---
 @st.cache_data
 def load_data_and_geojson():
     # 💡 구글 드라이브 파일 ID 입력 (미입력 시 안전 더미 가동)
@@ -55,11 +55,11 @@ def load_data_and_geojson():
 
     return df_119, seoul_geojson
 
-# 안전한 더미 데이터 생성기
+# 안전한 더미 데이터 생성기 (시간대 정보 포함)
 @st.cache_data
 def generate_safe_dummy_data():
     np.random.seed(42)
-    dates = pd.date_range(start='2020-05-01', end='2024-09-30')
+    dates = pd.date_range(start='2020-05-01', end='2024-09-30', freq='D')
     gu_list = ['강남구', '송파구', '강서구', '노원구', '관악구', '은평구', '양천구', '성동구', '용산구', '종로구', '중구', '마포구',
                '광진구', '동대문구', '중랑구', '성북구', '강북구', '도봉구', '서대문구', '구로구', '금천구', '영등포구', '동작구', '서초구', '강동구']
     
@@ -67,18 +67,25 @@ def generate_safe_dummy_data():
     for d in dates:
         for gu in gu_list:
             if 6 <= d.month <= 8:
-                count = np.random.poisson(lam=3.5)
+                base_count = np.random.poisson(lam=3.5)
             else:
-                count = np.random.poisson(lam=0.8)
-            data.append({
-                '발생일자': d, 
-                '연도': d.year,
-                '월': d.month,
-                '자치구': gu, 
-                '출동건수': count, 
-                '연령대': np.random.choice(['65세 이상', '65세 미만'], p=[0.45, 0.55]), 
-                '발생장소': np.random.choice(['실외 작업장', '논밭/길가', '주거지', '기타'])
-            })
+                base_count = np.random.poisson(lam=0.8)
+            
+            # 시간대별 분산 (오후 2~5시에 집중되도록 가중치 부여)
+            for hour in [10, 12, 14, 15, 16, 18]:
+                weight = 2.5 if hour in [14, 15, 16] else 1.0
+                c = int(base_count * weight * np.random.uniform(0.2, 0.5))
+                if c > 0:
+                    data.append({
+                        '발생일자': d, 
+                        '연도': d.year,
+                        '월': d.month,
+                        '시간': hour,
+                        '자치구': gu, 
+                        '출동건수': c, 
+                        '연령대': np.random.choice(['65세 이상', '65세 미만'], p=[0.45, 0.55]), 
+                        '발생장소': np.random.choice(['실외 작업장', '논밭/길가', '주거지', '기타'])
+                    })
     return pd.DataFrame(data)
 
 # 데이터 및 지도 경계 로드
@@ -90,6 +97,9 @@ if '발생일자' in df_119.columns and '월' not in df_119.columns:
     df_119['발생일자'] = pd.to_datetime(df_119['발생일자'], errors='coerce')
     df_119['연도'] = df_119['발생일자'].dt.year
     df_119['월'] = df_119['발생일자'].dt.month
+
+if '시간' not in df_119.columns:
+    df_119['시간'] = 14 # 기본값 오후 2시
 
 # --- 사이드바 필터 ---
 st.sidebar.header("🔍 분석 조건 설정")
@@ -105,7 +115,7 @@ filtered_df = df_119[
 
 # --- 대시보드 타이틀 ---
 st.title("🔥 서울시 폭염 온열질환 및 119 응급출동 시공간 분석 대시보드")
-st.markdown("여름철(5~9월) 기후 리스크 대응을 위한 **지표화(Index)**·**타겟팅(Targeting)**·**공간 위험도 지도** 통합 분석 (2020~2024)")
+st.markdown("여름철 기후 리스크 대응을 위한 **지표화(Index)**·**타겟팅(Targeting)**·**공간 위험도 지도** 통합 분석 (2020~2024)")
 st.markdown("---")
 
 # --- 모듈 1: 메인 KPI (지표화) ---
@@ -124,14 +134,27 @@ col4.metric(label="고령층(65세 이상) 비중", value="44.2%", delta="+3.1%p
 
 st.markdown("")
 
-# --- 모듈 2: 시계열 추이 ---
-st.subheader("📈 모듈 2: 5~9월 시공간 추이 분석")
-if '발생일자' in filtered_df.columns and '출동건수' in filtered_df.columns:
-    time_trend = filtered_df.groupby('발생일자')['출동건수'].sum().reset_index()
-    fig_time = px.line(time_trend, x='발생일자', y='출동건수', title='일별 119 온열질환 응급출동 추이',
-                       labels={'발생일자': '날짜', '출동건수': '응급출동 건수'})
-    fig_time.update_traces(line_color='#FF4B4B')
-    st.plotly_chart(fig_time, use_container_width=True)
+# --- 모듈 2: 시공간 추이 및 시간대별 골든타임 히트맵 ---
+st.subheader("📈 모듈 2: 5~9월 시공간 추이 및 시간대별 취약성 분석")
+col_t1, col_t2 = st.columns(2)
+
+with col_t1:
+    if '발생일자' in filtered_df.columns and '출동건수' in filtered_df.columns:
+        time_trend = filtered_df.groupby('발생일자')['출동건수'].sum().reset_index()
+        fig_time = px.line(time_trend, x='발생일자', y='출동건수', title='일별 119 온열질환 응급출동 추이',
+                           labels={'발생일자': '날짜', '출동건수': '응급출동 건수'})
+        fig_time.update_traces(line_color='#FF4B4B')
+        st.plotly_chart(fig_time, use_container_width=True)
+
+with col_t2:
+    if '시간' in filtered_df.columns and '월' in filtered_df.columns:
+        # 시간대별 x 월별 히트맵 생성
+        heat_data = filtered_df.groupby(['월', '시간'])['출동건수'].sum().reset_index()
+        fig_heat = px.density_heatmap(heat_data, x='월', y='시간', z='출동건수', 
+                                      title='월별·시간대별 온열질환 집중 골든타임 히트맵',
+                                      labels={'월': '월(Month)', '시간': '시간대(Hour)', '출동건수': '발생 건수'},
+                                      color_continuous_scale='Reds')
+        st.plotly_chart(fig_heat, use_container_width=True)
 
 # --- 모듈 3: 공간 위험도 지도 (Choropleth Map) & 자치구 랭킹 ---
 st.subheader("🗺️ 모듈 3: 서울시 자치구별 폭염 위험 지도 및 핫스팟 분석")
@@ -142,7 +165,6 @@ if not gu_agg.empty:
 
     with col_map:
         if seoul_geojson is not None:
-            # Plotly Choropleth 지도 시각화
             fig_map = px.choropleth(
                 gu_agg,
                 geojson=seoul_geojson,
